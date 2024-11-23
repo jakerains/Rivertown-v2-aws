@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.env
+.env.local
+.venv
+venv/
+ENV/
+.idea/
+.vscode/
+
+# IDE and Editor files
+.cursorrules
+
+# Documentation files
+v0.md
+ragsystempromptexample.md
+
+# Customer data processing scripts and files
+cusdata/
+
+# Ignore Streamlit secrets
+.streamlit/secrets.toml
+.streamlit/secrets.toml
+.streamlit/secrets.toml
+.streamlit/secrets.toml
+.streamlit/secrets.toml
