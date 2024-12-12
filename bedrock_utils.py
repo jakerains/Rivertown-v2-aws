@@ -1,20 +1,52 @@
 import boto3
-import os
 import json
 import logging
-from dotenv import load_dotenv
-from typing import Dict
+from botocore.exceptions import ClientError
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
+
+def get_secret() -> Optional[Dict[str, str]]:
+    """Get secrets from AWS Secrets Manager"""
+    secret_name = "rivertownchat"
+    region_name = "us-east-1"
+
+    try:
+        session = boto3.session.Session()
+        client = session.client(
+            service_name='secretsmanager',
+            region_name=region_name
+        )
+
+        get_secret_value_response = client.get_secret_value(
+            SecretId=secret_name
+        )
+        
+        if 'SecretString' in get_secret_value_response:
+            secret = json.loads(get_secret_value_response['SecretString'])
+            return secret
+        
+        logger.error("No SecretString found in the response")
+        return None
+
+    except ClientError as e:
+        logger.error(f"Error getting secret: {str(e)}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error getting secret: {str(e)}")
+        return None
 
 def init_bedrock():
     """Initialize Bedrock runtime client for Claude"""
     try:
-        load_dotenv()
+        # Get secrets from AWS Secrets Manager
+        secrets = get_secret()
+        if not secrets:
+            raise Exception("Failed to get secrets from AWS Secrets Manager")
         
         session = boto3.Session(
-            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+            aws_access_key_id=secrets.get('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=secrets.get('AWS_SECRET_ACCESS_KEY'),
             region_name='us-east-1'
         )
         
@@ -99,9 +131,16 @@ def verify_bedrock_setup():
     """Verify that Bedrock is set up correctly"""
     try:
         logger.info("Verifying Bedrock setup...")
-        logger.info(f"AWS_ACCESS_KEY_ID: {os.getenv('AWS_ACCESS_KEY_ID')[:4]}...{os.getenv('AWS_ACCESS_KEY_ID')[-4:]}")
-        logger.info(f"AWS_SECRET_ACCESS_KEY: {os.getenv('AWS_SECRET_ACCESS_KEY')[:4]}...{os.getenv('AWS_SECRET_ACCESS_KEY')[-4:]}")
-        logger.info(f"AWS_REGION: {os.getenv('AWS_REGION')}")
+        
+        # Get secrets
+        secrets = get_secret()
+        if not secrets:
+            raise Exception("Failed to get secrets from AWS Secrets Manager")
+            
+        # Log partial keys for verification
+        logger.info(f"AWS_ACCESS_KEY_ID: {secrets.get('AWS_ACCESS_KEY_ID', '')[:4]}...{secrets.get('AWS_ACCESS_KEY_ID', '')[-4:]}")
+        logger.info(f"AWS_SECRET_ACCESS_KEY: {secrets.get('AWS_SECRET_ACCESS_KEY', '')[:4]}...{secrets.get('AWS_SECRET_ACCESS_KEY', '')[-4:]}")
+        logger.info(f"AWS_REGION: {secrets.get('AWS_REGION', 'us-east-1')}")
         
         # Initialize Bedrock client
         runtime_client = init_bedrock()

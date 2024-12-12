@@ -4,30 +4,37 @@ import boto3
 from boto3.dynamodb.conditions import Attr
 from boto3.dynamodb.types import TypeDeserializer
 from datetime import datetime
-import os
-from dotenv import load_dotenv
+from bedrock_utils import get_secret
 
 logger = logging.getLogger(__name__)
 deserializer = TypeDeserializer()
 
 def init_dynamodb():
     """Initialize and return DynamoDB resource"""
-    load_dotenv('.env.local')
-    
-    # Set default region if not specified in environment
-    region = os.getenv('AWS_REGION', 'us-east-1')
-    
-    # Common AWS credentials
-    aws_config = {
-        'aws_access_key_id': os.getenv('AWS_ACCESS_KEY_ID'),
-        'aws_secret_access_key': os.getenv('AWS_SECRET_ACCESS_KEY'),
-        'region_name': region
-    }
-    
-    # Initialize DynamoDB resource with explicit configuration
-    dynamodb = boto3.resource('dynamodb', **aws_config)
-    
-    return dynamodb
+    try:
+        # Get secrets from AWS Secrets Manager
+        secrets = get_secret()
+        if not secrets:
+            raise Exception("Failed to get secrets from AWS Secrets Manager")
+        
+        # Set default region if not specified in secrets
+        region = secrets.get('AWS_REGION', 'us-east-1')
+        
+        # Common AWS credentials
+        aws_config = {
+            'aws_access_key_id': secrets.get('AWS_ACCESS_KEY_ID'),
+            'aws_secret_access_key': secrets.get('AWS_SECRET_ACCESS_KEY'),
+            'region_name': region
+        }
+        
+        # Initialize DynamoDB resource with explicit configuration
+        dynamodb = boto3.resource('dynamodb', **aws_config)
+        
+        return dynamodb
+        
+    except Exception as e:
+        logger.error(f"Error initializing DynamoDB: {str(e)}")
+        raise e
 
 def get_customer_orders(dynamodb, first_name: str, last_name: str) -> Optional[List[Dict]]:
     """

@@ -1,25 +1,25 @@
 import boto3
-import os
 import logging
-from dotenv import load_dotenv
 from typing import Optional, Dict, Any
+from bedrock_utils import get_secret
 
 logger = logging.getLogger(__name__)
 
 def init_knowledge_base():
     """Initialize Bedrock Agent Runtime client for KB"""
     try:
-        # Load environment variables explicitly
-        load_dotenv('.env')
-        load_dotenv('.env.local', override=True)
+        # Get secrets from AWS Secrets Manager
+        secrets = get_secret()
+        if not secrets:
+            raise Exception("Failed to get secrets from AWS Secrets Manager")
         
         # Get and verify KB ID
-        kb_id = os.getenv('BEDROCK_KB_ID')
+        kb_id = secrets.get('BEDROCK_KB_ID')
         logger.info(f"Initializing Knowledge Base with ID: {kb_id}")
         
         session = boto3.Session(
-            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+            aws_access_key_id=secrets.get('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=secrets.get('AWS_SECRET_ACCESS_KEY'),
             region_name='us-east-1'
         )
         
@@ -41,8 +41,13 @@ def get_knowledge_base_response(kb_client, query: str) -> str:
             logger.error("Knowledge base client is not initialized")
             return ""
             
-        # Get the model ARN from environment or use Claude
-        model_arn = os.getenv('BEDROCK_MODEL_ARN', 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-haiku-20240307-v1:0')
+        # Get secrets
+        secrets = get_secret()
+        if not secrets:
+            raise Exception("Failed to get secrets from AWS Secrets Manager")
+            
+        # Get the model ARN from secrets or use Claude
+        model_arn = secrets.get('BEDROCK_MODEL_ARN', 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-haiku-20240307-v1:0')
             
         response = kb_client.retrieve_and_generate(
             input={
@@ -51,7 +56,7 @@ def get_knowledge_base_response(kb_client, query: str) -> str:
             retrieveAndGenerateConfiguration={
                 "type": "KNOWLEDGE_BASE",
                 "knowledgeBaseConfiguration": {
-                    "knowledgeBaseId": os.getenv('BEDROCK_KB_ID'),
+                    "knowledgeBaseId": secrets.get('BEDROCK_KB_ID'),
                     "modelArn": model_arn,
                     "retrievalConfiguration": {
                         "vectorSearchConfiguration": {
@@ -87,12 +92,17 @@ def verify_kb_setup() -> bool:
     try:
         logger.info("Verifying Knowledge Base setup...")
         
-        # Check required environment variables
+        # Get secrets
+        secrets = get_secret()
+        if not secrets:
+            raise Exception("Failed to get secrets from AWS Secrets Manager")
+        
+        # Check required secrets
         required_vars = ['BEDROCK_KB_ID', 'BEDROCK_MODEL_ARN']
         for var in required_vars:
-            value = os.getenv(var)
+            value = secrets.get(var)
             if not value:
-                logger.error(f"Missing required environment variable: {var}")
+                logger.error(f"Missing required secret: {var}")
                 return False
             logger.info(f"{var} is set")
         

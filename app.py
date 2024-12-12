@@ -1,5 +1,5 @@
 import streamlit as st
-from bedrock_utils import init_bedrock
+from bedrock_utils import init_bedrock, get_secret
 from knowledge_base import init_knowledge_base
 from chat_service import get_combined_response
 import json
@@ -15,13 +15,19 @@ from datetime import datetime
 # Load environment variables
 load_dotenv()
 
+# Initialize logger
+logger = logging.getLogger(__name__)
+
+# Get secrets from AWS Secrets Manager
+secrets = get_secret()
+if not secrets:
+    st.error("Failed to get secrets from AWS Secrets Manager")
+    st.stop()
+
 # Initialize clients
 runtime_client = init_bedrock()
 kb_client = init_knowledge_base()
 dynamodb_client = init_dynamodb()
-
-# Configure logger
-logger = logging.getLogger(__name__)
 
 # Set page config with custom theme and hidden menu
 st.set_page_config(
@@ -185,7 +191,7 @@ if prompt := st.chat_input("Ask about our products..."):
             # Now we can make the call
             bland_url = "https://api.bland.ai/v1/calls"
             headers = {
-                "Authorization": f"Bearer {os.getenv('BLAND_API_KEY')}",
+                "Authorization": f"Bearer {secrets.get('BLAND_API_KEY')}",
                 "Content-Type": "application/json"
             }
             
@@ -220,12 +226,13 @@ if prompt := st.chat_input("Ask about our products..."):
         # Check for order lookup requests first
         if any(phrase in prompt.lower() for phrase in ['orders for', 'order for', 'show orders']):
             try:
-                # Extract name using simple split
-                name_parts = prompt.lower().replace('orders for', '').replace('order for', '').replace('show orders for', '').strip().split()
-                if len(name_parts) >= 2:
-                    first_name, last_name = name_parts[0], name_parts[1]
+                # Extract name using regex to better handle the full phrase
+                name_match = re.search(r'(?:orders for|order for|show orders for)\s+([a-zA-Z]+)\s+([a-zA-Z]+)', prompt.lower())
+                
+                if name_match:
+                    first_name, last_name = name_match.groups()
                     
-                    # Query DynamoDB - using exact same code as test
+                    # Query DynamoDB
                     table = dynamodb_client.Table('Rivertownball-cus')
                     response = table.scan(
                         FilterExpression='#fn = :fn and #ln = :ln',
@@ -347,7 +354,7 @@ with st.sidebar:
 # Make the Bland API call
 bland_url = "https://api.bland.ai/v1/calls"
 headers = {
-    "Authorization": f"Bearer {os.getenv('BLAND_API_KEY')}",
+    "Authorization": f"Bearer {secrets.get('BLAND_API_KEY')}",
     "Content-Type": "application/json"
 }
 
