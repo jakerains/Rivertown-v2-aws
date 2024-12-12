@@ -3,38 +3,45 @@ import json
 import logging
 from botocore.exceptions import ClientError
 from typing import Dict, Optional
+import os
 
 logger = logging.getLogger(__name__)
 
 def get_secret() -> Optional[Dict[str, str]]:
-    """Get secrets from AWS Secrets Manager"""
-    secret_name = "rivertownchat"
-    region_name = "us-east-1"
-
+    """Get secrets from AWS Secrets Manager or fallback to environment variables"""
     try:
+        # First try to get secrets from AWS Secrets Manager
         session = boto3.session.Session()
         client = session.client(
             service_name='secretsmanager',
-            region_name=region_name
-        )
-
-        get_secret_value_response = client.get_secret_value(
-            SecretId=secret_name
+            region_name=os.getenv('AWS_REGION', 'us-east-1'),
+            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
         )
         
-        if 'SecretString' in get_secret_value_response:
-            secret = json.loads(get_secret_value_response['SecretString'])
-            return secret
+        # Update secret name to rivertownchat
+        secret_name = os.getenv('SECRET_NAME', 'rivertownchat')
         
-        logger.error("No SecretString found in the response")
-        return None
-
-    except ClientError as e:
-        logger.error(f"Error getting secret: {str(e)}")
-        return None
+        try:
+            get_secret_value_response = client.get_secret_value(SecretId=secret_name)
+            if 'SecretString' in get_secret_value_response:
+                return json.loads(get_secret_value_response['SecretString'])
+        except client.exceptions.ResourceNotFoundException:
+            logger.warning(f"Secret {secret_name} not found in AWS Secrets Manager")
+        except Exception as e:
+            logger.warning(f"Error accessing AWS Secrets Manager: {str(e)}")
+            
     except Exception as e:
-        logger.error(f"Unexpected error getting secret: {str(e)}")
-        return None
+        logger.warning(f"Could not initialize AWS Secrets Manager client: {str(e)}")
+    
+    # Fallback to environment variables
+    logger.info("Falling back to environment variables")
+    return {
+        'AWS_ACCESS_KEY_ID': os.getenv('AWS_ACCESS_KEY_ID'),
+        'AWS_SECRET_ACCESS_KEY': os.getenv('AWS_SECRET_ACCESS_KEY'),
+        'AWS_REGION': os.getenv('AWS_REGION', 'us-east-1'),
+        'BLAND_API_KEY': os.getenv('BLAND_API_KEY'),
+    }
 
 def init_bedrock():
     """Initialize Bedrock runtime client for Claude"""
