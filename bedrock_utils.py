@@ -38,14 +38,14 @@ def get_claude_response(runtime_client, prompt: str) -> Dict[str, str]:
 
 Keep responses natural, concise, and friendly. Avoid formal phrases like "Thank you for your inquiry" or "As a knowledgeable assistant." Instead, respond as a helpful person would in a natural conversation.
 
-Example style:
-Q: "What's your company history?"
-A: "We've been crafting premium wooden balls since 1985, specializing in..."
+If a customer asks to speak with someone, wants to make a phone call, or requests a call back, respond with a special JSON format:
+{
+    "type": "phone_request",
+    "message": "I'll help connect you with our team! First, could you tell me your first name?",
+    "stage": "name"
+}
 
-Q: "Can you tell me about your materials?"
-A: "We use carefully selected exotic woods like..."
-
-Remember: Be direct, friendly, and get straight to the helpful information."""
+For all other responses, be direct and friendly while sharing information about our premium wooden craft balls."""
 
         # Combine system prompt with user prompt
         full_prompt = f"{system_prompt}\n\nHuman: {prompt}\n\nAssistant:"

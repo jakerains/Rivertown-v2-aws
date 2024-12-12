@@ -4,7 +4,14 @@ from knowledge_base import init_knowledge_base
 from chat_service import get_combined_response
 import json
 import logging
+import os
+from dotenv import load_dotenv
 from streamlit.components.v1 import html as st_html  # Import Streamlit's HTML component
+import re
+import requests
+
+# Load environment variables
+load_dotenv()
 
 # Initialize clients
 runtime_client = init_bedrock()
@@ -125,8 +132,10 @@ if "messages" not in st.session_state:
     })
 if "phone_number" not in st.session_state:
     st.session_state.phone_number = None
-if "cs_mode" not in st.session_state:
-    st.session_state.cs_mode = False
+if "first_name" not in st.session_state:
+    st.session_state.first_name = None
+if "phone_request_stage" not in st.session_state:
+    st.session_state.phone_request_stage = None
 
 # Create a container for chat messages
 chat_container = st.container()
@@ -142,29 +151,101 @@ with chat_container:
 
 # Accept user input
 if prompt := st.chat_input("Ask about our products..."):
-    # Add user message immediately
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    
-    # Display user message
+    # Display user message immediately
     with st.chat_message("user", avatar="👤"):
         st.markdown(prompt)
     
-    # Create a response placeholder
+    # Add user message to chat history
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    # Display assistant response with thinking indicator
     with st.chat_message("assistant", avatar="🟤"):
         response_placeholder = st.empty()
-        response_placeholder.markdown("Thinking...")
+        thinking_placeholder = st.empty()
+        thinking_placeholder.markdown("_Thinking..._")
         
-        # Get response
+        # If we're in the phone request flow
+        if st.session_state.phone_request_stage == "name":
+            st.session_state.first_name = prompt
+            response = "Great! Now, could you please provide your phone number?"
+            thinking_placeholder.empty()
+            response_placeholder.markdown(response)
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": response
+            })
+            st.session_state.phone_request_stage = "phone"
+            st.stop()
+            
+        elif st.session_state.phone_request_stage == "phone":
+            st.session_state.phone_number = prompt
+            # Now we can make the call
+            bland_url = "https://api.bland.ai/v1/calls"
+            headers = {
+                "Authorization": f"Bearer {os.getenv('BLAND_API_KEY')}",
+                "Content-Type": "application/json"
+            }
+            
+            call_data = {
+                "phone_number": st.session_state.phone_number,
+                "task": "You are Sara from Rivertown Ball Company. Be friendly and professional while helping customers with wooden craft balls.",
+                "voice": "alexa",
+                "model": "turbo",
+                "first_sentence": f"Hello, is this {st.session_state.first_name}?",
+                "wait_for_greeting": True,
+                "after_greeting": f"Hey {st.session_state.first_name}, this is Sara from the Rivertown Ball Company. You were just online chatting and requested a quick call. How can I help you today?",
+                "temperature": 0.8,
+                "max_duration": 8
+            }
+            
+            try:
+                bland_response = requests.post(bland_url, json=call_data, headers=headers)
+                response = "Great! I'm connecting you with Sara right now. You should receive a call shortly." if bland_response.status_code == 200 else "I apologize, but I'm having trouble connecting the call. Please try again."
+            except Exception as e:
+                logger.error(f"Error making Bland API call: {e}")
+                response = "I apologize, but I'm having trouble connecting the call. Please try again."
+            
+            thinking_placeholder.empty()
+            response_placeholder.markdown(response)
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": response
+            })
+            st.session_state.phone_request_stage = None
+            st.stop()
+        
+        # Get normal response
         response = get_combined_response(runtime_client, kb_client, prompt)
         
-        # Update placeholder with final response
-        response_placeholder.markdown(response['content'])
+        # Try to parse JSON from string response
+        if isinstance(response['content'], str):
+            try:
+                json_match = re.search(r'\{[\s\S]*\}', response['content'])
+                if json_match:
+                    content = json.loads(json_match.group())
+                    if content.get('type') == 'phone_request':
+                        response['content'] = content
+                        st.session_state.phone_request_stage = "name"
+            except (json.JSONDecodeError, AttributeError):
+                pass
+
+        # Remove thinking message and display response
+        thinking_placeholder.empty()
         
-        # Add response to chat history
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": response['content']
-        })
+        # Display response
+        if isinstance(response['content'], dict) and response['content'].get('type') == 'phone_request':
+            message = response['content']['message']
+            response_placeholder.markdown(message)
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": message
+            })
+        else:
+            response_placeholder.markdown(response['content'])
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": response['content']
+            })
 
 # Sidebar with reset button and additional info
 with st.sidebar:
@@ -182,3 +263,21 @@ with st.sidebar:
         for over a century. Our commitment to quality and craftsmanship 
         makes us the leading choice for wooden ball products.
     """)
+# Make the Bland API call
+bland_url = "https://api.bland.ai/v1/calls"
+headers = {
+    "Authorization": f"Bearer {os.getenv('BLAND_API_KEY')}",
+    "Content-Type": "application/json"
+}
+
+call_data = {
+    "phone_number": st.session_state.phone_number,
+    "task": "You are Sara from Rivertown Ball Company. Be friendly and professional while helping customers with wooden craft balls.",
+    "voice": "alexa",
+    "model": "turbo",
+    "first_sentence": f"Hello, is this {st.session_state.first_name}?",
+    "wait_for_greeting": True,
+    "after_greeting": f"Hey {st.session_state.first_name}, this is Sara from the Rivertown Ball Company. You were just online chatting and requested a quick call. How can I help you today?",
+    "temperature": 0.8,
+    "max_duration": 8
+}

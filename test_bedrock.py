@@ -4,6 +4,9 @@ from knowledge_base import init_knowledge_base, get_knowledge_base_response, ver
 from chat_service import get_combined_response
 from dotenv import load_dotenv
 import os
+import requests
+import json
+import re
 
 def test_claude():
     """Test Claude's basic functionality"""
@@ -112,6 +115,87 @@ def test_combined_service():
         print(f"❌ Combined service test failed: {str(e)}")
         return False
 
+def test_bland_integration():
+    """Test Bland AI phone system integration"""
+    print("\nTesting Bland AI Integration:")
+    print("=" * 50)
+    
+    try:
+        # Test Bland API key exists
+        bland_api_key = os.getenv('BLAND_API_KEY')
+        if not bland_api_key:
+            print("❌ Missing BLAND_API_KEY environment variable")
+            return False
+            
+        # Test API connection with a real call request
+        bland_url = "https://api.bland.ai/v1/calls"
+        headers = {
+            "Authorization": f"Bearer {bland_api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # Real call data
+        test_data = {
+            "phone_number": "+17122230473",
+            "task": "You are Sara from Rivertown Ball Company. Be friendly and professional while helping customers with wooden craft balls.",
+            "voice": "alexa",
+            "model": "turbo",
+            "first_sentence": "Hello, is this Jake?",
+            "wait_for_greeting": True,
+            "after_greeting": "Hey Jake, this is Sara from the Rivertown Ball Company. You were just online chatting and requested a quick call. How can I help you today?",
+            "temperature": 0.8,
+            "max_duration": 8
+        }
+        
+        print("Initiating test call...")
+        response = requests.post(bland_url, json=test_data, headers=headers)
+        
+        if response.status_code != 200:
+            print(f"❌ Bland API test failed: {response.text}")
+            return False
+            
+        print("✅ Bland API call initiated successfully")
+        print(f"Response: {response.json()}")
+        
+        # Test phone request format from Claude
+        runtime_client = init_bedrock()
+        test_prompt = "I'd like to speak with someone about placing an order"
+        
+        response = get_claude_response(runtime_client, test_prompt)
+        content = response.get('content', '')
+        
+        # Try to extract JSON from the response text
+        json_match = re.search(r'\{[\s\S]*\}', content)
+        if json_match:
+            try:
+                content = json.loads(json_match.group())
+            except json.JSONDecodeError:
+                print("❌ Failed to parse JSON from Claude response")
+                print(f"Raw content: {content}")
+                return False
+        
+        # Updated to match the expected format from bedrock_utils.py
+        expected_format = {
+            "type": "phone_request",
+            "message": "I'll help connect you with our team! First, could you tell me your first name?",
+            "stage": "name"
+        }
+        
+        if not isinstance(content, dict) or content.get('type') != 'phone_request' or 'stage' not in content:
+            print("❌ Claude not returning correct phone request format")
+            print(f"Expected format: {expected_format}")
+            print(f"Received format: {content}")
+            return False
+            
+        print("✅ Claude phone request format correct")
+        print(f"Response format: {content}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Bland integration test failed: {str(e)}")
+        return False
+
 def verify_environment():
     """Verify environment variables"""
     required_vars = {
@@ -119,6 +203,7 @@ def verify_environment():
         'AWS_SECRET_ACCESS_KEY': 'AWS Secret Key',
         'AWS_REGION': 'AWS Region',
         'BEDROCK_KB_ID': 'Bedrock Knowledge Base ID',
+        'BLAND_API_KEY': 'Bland AI API Key',
     }
     
     missing_vars = []
@@ -143,7 +228,8 @@ def run_specific_test(test_name: str = None):
     tests = {
         "claude": test_claude,
         "kb": test_knowledge_base,
-        "combined": test_combined_service
+        "combined": test_combined_service,
+        "bland": test_bland_integration
     }
     
     if test_name and test_name in tests:
