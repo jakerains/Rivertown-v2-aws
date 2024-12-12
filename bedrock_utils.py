@@ -136,56 +136,79 @@ def format_order_table(orders: list) -> str:
     return html
 
 def get_response_with_rag(runtime_client, prompt: str) -> Union[Dict[str, str], str]:
-    """Get response using RAG approach"""
     try:
-        # 1. First check for order lookup
-        customer_name = extract_customer_name(prompt)
-        if customer_name:
-            first_name, last_name = customer_name
-            logger.info(f"Looking up orders for {first_name} {last_name}")
-            
-            orders = get_customer_orders(init_dynamodb(), first_name, last_name)
-            logger.info(f"Found orders: {orders}")
-            
-            if orders:
-                formatted_orders = format_order_table(orders)
-                logger.info("Orders formatted successfully")
-                return {
-                    "type": "html",
-                    "content": formatted_orders
-                }
-            return {
-                "type": "text",
-                "content": f"I couldn't find any orders for {first_name} {last_name}. Would you like to place a new order?"
-            }
+        # Debug: Print initial prompt
+        logger.debug(f"Incoming prompt: {prompt}")
 
-        # 2. For regular chat responses using Claude 3.5 Haiku
+        system_prompt = """You are a helpful customer service AI assistant for Rivertown Ball Company, a manufacturer of artisanal wooden balls. Your name is River.
+
+Key Information:
+- You specialize in helping customers with questions about our wooden balls, orders, and general inquiries
+- You can look up customer orders when given a name
+- You can connect customers with a live representative named Sara if needed
+- You maintain a friendly, professional, and helpful tone
+
+Guidelines:
+- If customers ask about orders, use the extract_customer_name function to find their orders
+- If customers want to speak to a person, use the handle_customer_service_request function
+- Always be truthful - if you don't know something, say so
+- Focus on providing accurate information about our wooden ball products
+- Keep responses concise but informative
+
+Products:
+- We specialize in handcrafted wooden balls made from sustainable materials
+- Each ball is carefully inspected for quality
+- Our balls come in various sizes and wood types
+
+Customer Service:
+- Phone support is available at (719) 266-2837
+- Live chat with Sara can be arranged through the system
+- We aim to respond to all inquiries within 24 hours"""
+
+        # Combine system prompt and user prompt
+        combined_prompt = f"{system_prompt}\n\nHuman: {prompt}\n\nAssistant:"
+
         body = json.dumps({
-            "modelId": "us.anthropic.claude-3-5-haiku-20241022-v1:0",
-            "contentType": "application/json",
-            "accept": "application/json",
-            "body": {
-                "prompt": f"\n\nHuman: {prompt}\n\nAssistant:",
-                "max_tokens": 2048,
-                "temperature": 0.7,
-                "top_p": 1,
-                "stop_sequences": ["\n\nHuman:"]
-            }
+            "anthropic_version": "bedrock-2023-05-31",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": combined_prompt
+                        }
+                    ]
+                }
+            ],
+            "max_tokens": 2048,
+            "temperature": 0.7
         })
-        
+
         try:
             response = runtime_client.invoke_model(
-                modelId="us.anthropic.claude-3-5-haiku-20241022-v1:0",
+                modelId="anthropic.claude-3-haiku-20240307-v1:0",
                 contentType="application/json",
                 accept="application/json",
                 body=body.encode('utf-8')
             )
             
             response_body = json.loads(response['body'].read())
-            return {
-                "type": "text",
-                "content": response_body.get('completion', '')
-            }
+            logger.debug(f"Raw response: {response_body}")
+            
+            # Handle Claude 3's response structure
+            if 'content' in response_body:
+                return {
+                    "type": "text",
+                    "content": response_body['content'][0]['text'] if isinstance(response_body['content'], list) else response_body['content']
+                }
+            else:
+                logger.error(f"Unexpected response structure. Keys found: {response_body.keys()}")
+                return {
+                    "type": "text",
+                    "content": "Error: Unexpected response format from language model"
+                }
+
         except Exception as e:
             logger.error(f"Bedrock API error: {str(e)}")
             return {
@@ -196,6 +219,46 @@ def get_response_with_rag(runtime_client, prompt: str) -> Union[Dict[str, str], 
     except Exception as e:
         logger.error(f"Error getting response from Bedrock: {str(e)}")
         raise e
+
+def verify_bedrock_setup():
+    """Utility function to verify Bedrock configuration"""
+    logger.info("Verifying Bedrock setup...")
+    
+    # Check environment variables
+    required_vars = ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_REGION']
+    for var in required_vars:
+        if not os.getenv(var):
+            logger.error(f"Missing required environment variable: {var}")
+            return False
+        else:
+            # Print first/last 4 chars of credentials for debugging
+            if 'KEY' in var:
+                value = os.getenv(var)
+                logger.info(f"{var}: {value[:4]}...{value[-4:]}")
+            else:
+                logger.info(f"{var}: {os.getenv(var)}")
+
+    try:
+        # Test Bedrock client initialization
+        _, runtime_client = init_bedrock()
+        if runtime_client is None:
+            logger.error("Failed to initialize Bedrock runtime client")
+            return False
+        
+        # Test simple model invocation
+        test_response = get_response_with_rag(runtime_client, "Say 'test' if you can hear me")
+        logger.info(f"Test response: {test_response}")
+        
+        if test_response.get('type') == 'text' and 'error' not in test_response.get('content', '').lower():
+            logger.info("✅ Bedrock setup verification completed successfully")
+            return True
+        else:
+            logger.error("❌ Bedrock test invocation failed")
+            return False
+
+    except Exception as e:
+        logger.error(f"❌ Bedrock setup verification failed: {str(e)}", exc_info=True)
+        return False
 
 def init_bland():
     """Initialize Bland API configuration"""
