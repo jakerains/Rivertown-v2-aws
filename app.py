@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 from streamlit.components.v1 import html as st_html  # Import Streamlit's HTML component
 import re
 import requests
+from dynamo_utils import init_dynamodb, get_customer_orders
+from datetime import datetime
 
 # Load environment variables
 load_dotenv()
@@ -16,6 +18,7 @@ load_dotenv()
 # Initialize clients
 runtime_client = init_bedrock()
 kb_client = init_knowledge_base()
+dynamodb_client = init_dynamodb()
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -214,7 +217,85 @@ if prompt := st.chat_input("Ask about our products..."):
             st.session_state.phone_request_stage = None
             st.stop()
         
-        # Get normal response
+        # Check for order lookup requests first
+        if any(phrase in prompt.lower() for phrase in ['orders for', 'order for', 'show orders']):
+            try:
+                # Extract name using simple split
+                name_parts = prompt.lower().replace('orders for', '').replace('order for', '').replace('show orders for', '').strip().split()
+                if len(name_parts) >= 2:
+                    first_name, last_name = name_parts[0], name_parts[1]
+                    
+                    # Query DynamoDB - using exact same code as test
+                    table = dynamodb_client.Table('Rivertownball-cus')
+                    response = table.scan(
+                        FilterExpression='#fn = :fn and #ln = :ln',
+                        ExpressionAttributeNames={
+                            '#fn': 'first_name',
+                            '#ln': 'last_name'
+                        },
+                        ExpressionAttributeValues={
+                            ':fn': first_name.title(),
+                            ':ln': last_name.title()
+                        }
+                    )
+                    
+                    if 'Items' in response and len(response['Items']) > 0:
+                        customer = response['Items'][0]
+                        formatted_response = [f"## 📦 Orders for {first_name.title()} {last_name.title()}"]
+                        
+                        if 'orders' in customer and customer['orders']:
+                            for order in customer['orders']:
+                                date_str = order.get('order_date', '')
+                                try:
+                                    date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                                    formatted_date = date_obj.strftime('%B %d, %Y')
+                                except:
+                                    formatted_date = date_str
+
+                                formatted_response.append(f"""
+<div style="background-color: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 10px; margin: 10px 0;">
+
+🔖 **Order ID**: `{order.get('order_id')}`
+
+🎁 **Product**: {order.get('product')}
+
+📊 **Quantity**: {order.get('quantity')}
+
+📅 **Date**: {formatted_date}
+
+💰 **Total**: ${float(order.get('total_price', 0)):.2f}
+</div>""")
+                        
+                        response_text = "\n".join(formatted_response)
+                        thinking_placeholder.empty()
+                        response_placeholder.markdown(response_text, unsafe_allow_html=True)
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": response_text
+                        })
+                        st.stop()
+                    else:
+                        error_msg = f"I couldn't find any orders for {first_name.title()} {last_name.title()}. Please verify the spelling or try another name."
+                        thinking_placeholder.empty()
+                        response_placeholder.markdown(error_msg)
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": error_msg
+                        })
+                        st.stop()
+                        
+            except Exception as e:
+                logger.error(f"Error looking up orders: {str(e)}")
+                error_msg = "I apologize, but I encountered an error while looking up the orders. Please try again."
+                thinking_placeholder.empty()
+                response_placeholder.markdown(error_msg)
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": error_msg
+                })
+                st.stop()
+        
+        # If no order lookup matched, get normal response from Claude
         response = get_combined_response(runtime_client, kb_client, prompt)
         
         # Try to parse JSON from string response
