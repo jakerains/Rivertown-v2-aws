@@ -1,28 +1,38 @@
 import streamlit as st
-from bedrock_utils import init_bedrock, get_response_with_rag, format_order_table
-from dynamo_utils import init_dynamodb
+from bedrock_utils import init_bedrock
+from knowledge_base import init_knowledge_base
+from chat_service import get_combined_response
 import json
 import logging
 from streamlit.components.v1 import html as st_html  # Import Streamlit's HTML component
 
-# Initialize Bedrock clients
-bedrock_client, runtime_client = init_bedrock()
-dynamodb = init_dynamodb()
+# Initialize clients
+runtime_client = init_bedrock()
+kb_client = init_knowledge_base()
 
 # Configure logger
 logger = logging.getLogger(__name__)
 
-# Set page config with custom theme
+# Set page config with custom theme and hidden menu
 st.set_page_config(
     page_title="Rivertown Ball Company",
     page_icon="🟤",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed",
+    menu_items={}
 )
 
 # Custom CSS for better styling
 st.markdown("""
     <style>
+    /* Hide Streamlit header menu and footer */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    
+    /* Hide hamburger menu */
+    .css-1rs6os {visibility: hidden;}
+    
     /* Global background and theme */
     .stApp {
         background: #fef3c7;
@@ -131,36 +141,30 @@ with chat_container:
                 st.markdown(message["content"])
 
 # Accept user input
-if prompt := st.chat_input("Ask about our wooden balls..."):
+if prompt := st.chat_input("Ask about our products..."):
+    # Add user message immediately
     st.session_state.messages.append({"role": "user", "content": prompt})
     
+    # Display user message
     with st.chat_message("user", avatar="👤"):
         st.markdown(prompt)
     
+    # Create a response placeholder
     with st.chat_message("assistant", avatar="🟤"):
-        try:
-            # Get the response
-            response = get_response_with_rag(runtime_client, prompt)
-            
-            # Handle the response based on its type
-            if isinstance(response, dict):
-                if response.get("type") == "html":
-                    st_html(response["content"], height=600, scrolling=True)
-                else:
-                    st.markdown(response["content"])
-            else:
-                st.markdown(response)
-            
-            # Add to chat history
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": response
-            })
+        response_placeholder = st.empty()
+        response_placeholder.markdown("Thinking...")
         
-        except Exception as e:
-            error_msg = f"Error: {str(e)}"
-            st.error(error_msg)
-            logger.error(f"Error in chat response: {str(e)}", exc_info=True)
+        # Get response
+        response = get_combined_response(runtime_client, kb_client, prompt)
+        
+        # Update placeholder with final response
+        response_placeholder.markdown(response['content'])
+        
+        # Add response to chat history
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": response['content']
+        })
 
 # Sidebar with reset button and additional info
 with st.sidebar:
