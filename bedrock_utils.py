@@ -19,12 +19,15 @@ def get_secret() -> Optional[Dict[str, str]]:
             aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
         )
         
-        # Update secret name to rivertownchat
+        # Update secret name to rivertownchat and add logging
         secret_name = os.getenv('SECRET_NAME', 'rivertownchat')
+        logger.info(f"Attempting to fetch secret with name: {secret_name}")
+        logger.info(f"Using AWS Region: {os.getenv('AWS_REGION', 'us-east-1')}")
         
         try:
             get_secret_value_response = client.get_secret_value(SecretId=secret_name)
             if 'SecretString' in get_secret_value_response:
+                logger.info("Successfully retrieved secret from AWS Secrets Manager")
                 return json.loads(get_secret_value_response['SecretString'])
         except client.exceptions.ResourceNotFoundException:
             logger.warning(f"Secret {secret_name} not found in AWS Secrets Manager")
